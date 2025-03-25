@@ -1,0 +1,126 @@
+Step 1: Create a BLAST database from the nuclear genome
+makeblastdb -in GCF_028408465.1_idAnaLude1.1_genomic.fna \
+            -input_type fasta \
+            -dbtype nucl \
+            -out GCF_028408465.1_idAnaLude1.1_genomic.fna
+Step 2: Run BLASTn to compare mitochondrial genes against the nuclear genome
+blastn -task blastn \
+       -db GCF_028408465.1_idAnaLude1.1_genomic.fna \
+       -query mtDNA_genes.txt \
+       -outfmt 6 \
+       -evalue 1e-3 \
+       -num_threads 1 \
+       -out blastn_genomaludens_vs_mitocondrial_genes_e0.001.out
+Python script to process BLAST results and export to Excel
+The following Python script processes the BLAST output and generates a detailed Excel file including:
+
+Mitochondrial gene size
+
+Number of alignments with the nuclear genome
+
+Minimum, average, and maximum alignment lengths
+
+Minimum, average, and maximum percentage of gene coverage
+
+Average, minimum, and maximum percent identity
+	   
+import pandas as pd
+
+def merge_intervals(intervals):
+    """Fusiona intervalos solapados.
+       Cada intervalo es una tupla (inicio, fin).
+    """
+    # Ordena los intervalos por el inicio
+    intervals = sorted(intervals, key=lambda x: x[0])
+    merged = []
+    for interval in intervals:
+        if not merged or merged[-1][1] < interval[0] - 1:
+            merged.append(interval)
+        else:
+            # Fusionar solapamientos extendiendo el final del intervalo actual
+            merged[-1] = (merged[-1][0], max(merged[-1][1], interval[1]))
+    return merged
+
+# Definir los nombres de las columnas según el formato outfmt 6
+columnas = [
+    "qseqid",    # Identificador del gen mitocondrial (consulta)
+    "sseqid",    # Identificador del sujeto (genoma nuclear)
+    "pident",    # Porcentaje de identidad
+    "length",    # Longitud del alineamiento
+    "mismatch",
+    "gapopen",
+    "qstart",    # Inicio del alineamiento en la consulta
+    "qend",      # Fin del alineamiento en la consulta
+    "sstart",
+    "send",
+    "evalue",
+    "bitscore"
+]
+
+# Leer el archivo BLAST en formato tabulado
+df = pd.read_csv("blastn_nuclear_vs_mitocondrial_genes_e0.001.out", sep="\t", names=columnas)
+
+resultados = []
+
+# Agrupar por gen mitocondrial (qseqid)
+for gen, grupo in df.groupby("qseqid"):
+    # Se estima el tamaño del gen como el máximo valor de qend
+    tamano_gen = grupo["qend"].max()
+    
+    # Número de alineamientos con el genoma nuclear
+    num_alineamientos = grupo.shape[0]
+    
+    # Estadísticos de los alineamientos
+    tamano_medio_aline = grupo["length"].mean()
+    tamano_min_aline = grupo["length"].min()
+    tamano_max_aline = grupo["length"].max()
+    
+    # Calcular la cobertura individual de cada alineamiento
+    cobertura_ind = (grupo["length"] / tamano_gen) * 100
+    cobertura_ind_min = cobertura_ind.min()
+    cobertura_ind_mean = cobertura_ind.mean()
+    cobertura_ind_max = cobertura_ind.max()
+    
+    # Generar lista de intervalos (qstart, qend) para cada alineamiento
+    intervalos = []
+    for _, fila in grupo.iterrows():
+        inicio = min(fila["qstart"], fila["qend"])
+        fin = max(fila["qstart"], fila["qend"])
+        intervalos.append((inicio, fin))
+    
+    # Fusionar intervalos solapados
+    intervalos_fusionados = merge_intervals(intervalos)
+    
+    # Calcular la longitud total cubierta (sin exceder el tamaño del gen)
+    longitud_cubierta = sum(fin - inicio + 1 for inicio, fin in intervalos_fusionados)
+    longitud_cubierta_efectiva = min(longitud_cubierta, tamano_gen)
+    # Esta será la cobertura efectiva máxima, ajustada a 100%
+    cobertura_efectiva = (longitud_cubierta_efectiva / tamano_gen) * 100
+    
+    # Estadísticos del porcentaje de identidad
+    identidad_promedio = grupo["pident"].mean()
+    identidad_min = grupo["pident"].min()
+    identidad_max = grupo["pident"].max()
+    
+    # Almacenar los resultados en un diccionario
+    resultados.append({
+        "Gen del genoma mitocondrial": gen,
+        "Tamaño del gen mitocondrial": tamano_gen,
+        "Numero de alineamientos con el genoma nuclear": num_alineamientos,
+        "Tamaño medio de los alineamientos": tamano_medio_aline,
+        "Tamaño minimo de los alineamientos": tamano_min_aline,
+        "Tamaño máximo de los alineamientos": tamano_max_aline,
+        "Porcentaje mínimo del gen cubierto en el alineamiento": cobertura_ind_min,
+        "Porcentaje medio del gen cubierto en el alineamiento": cobertura_ind_mean,
+        "Porcentaje máximo del gen cubierto en el alineamiento": cobertura_ind_max,
+        "Porcentaje máximo del gen cubierto (efectivo)": cobertura_efectiva,
+        "Porcentaje de identidad promedio": identidad_promedio,
+        "Porcentaje de identidad mínimo": identidad_min,
+        "Porcentaje de identidad máxmo": identidad_max
+    })
+
+# Convertir la lista de resultados en un DataFrame y exportar a Excel
+df_resultados = pd.DataFrame(resultados)
+df_resultados.to_excel("resultados.xlsx", index=False)
+
+print("Archivo Excel generado exitosamente: resultados.xlsx")
