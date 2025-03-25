@@ -1,0 +1,40 @@
+
+# NUMTs detection pipeline for Anastrepha ludens
+# BLAST-based analysis using Linux commands
+# --------------------------------------------
+
+# Step 1: Create BLAST database from nuclear genome
+makeblastdb -in GCF_028408465.1_idAnaLude1.1_genomic.fna -input_type fasta -dbtype nucl -out GCF_028408465.1_idAnaLude1.1_genomic.fna
+
+# Step 2: Run BLASTn (standard) with mitochondrial sequences
+blastn -task blastn \
+-db GCF_028408465.1_idAnaLude1.1_genomic.fna \
+-query sequence.fasta \
+-outfmt 6 \
+-max_target_seqs 100 \
+-evalue 1e-3 \
+-num_threads 1 \
+-out blastn_genomaludens_vs_mitocondrial_e0.001.out
+
+# Step 3: Run MegaBLAST (faster, for high-similarity sequences)
+blastn -task megablast \
+-db GCF_028408465.1_idAnaLude1.1_genomic.fna \
+-query sequence.fasta \
+-outfmt 6 \
+-max_target_seqs 100 \
+-evalue 1e-3 \
+-num_threads 1 \
+-out megablast_genomaludens_vs_mitocondrial_e0.001.out
+
+# Step 4: Filter BLASTn results to keep alignments ≥ 2000 bp
+awk '{if ($4 >= 2000) print}' blastn_genomaludens_vs_mitocondrial_e0.001.out > blastn_genomaludens_vs_mitocondrial_e0.001_higher2000.out
+
+# Step 5: Extract sequences from nuclear genome using coordinates
+python /home/catalina/programas/script/retrieve_fasta_coord_revcomp_dict.py \
+--input_list blastn_genomaludens_vs_mitocondrial_e0.001_higher2000_coordenadas \
+--input_fasta GCF_028408465.1_idAnaLude1.1_genomic.fna \
+--output_fasta genomaludens_mitocondrial.fasta \
+--mode fast
+
+# Step 6: Concatenate original mitochondrial and extracted nuclear sequences
+cat sequence.fasta genomaludens_mitocondrial.fasta > aludens_mitocondrial_nuclear.fasta
