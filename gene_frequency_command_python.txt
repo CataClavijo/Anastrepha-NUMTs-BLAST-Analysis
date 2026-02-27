@@ -1,16 +1,3 @@
-Step 1: Create a BLAST database from the nuclear genome
-makeblastdb -in GCF_028408465.1_idAnaLude1.1_genomic.fna \
-            -input_type fasta \
-            -dbtype nucl \
-            -out GCF_028408465.1_idAnaLude1.1_genomic.fna
-Step 2: Run BLASTn to compare mitochondrial genes against the nuclear genome
-blastn -task blastn \
-       -db GCF_028408465.1_idAnaLude1.1_genomic.fna \
-       -query mtDNA_genes.txt \
-       -outfmt 6 \
-       -evalue 1e-3 \
-       -num_threads 1 \
-       -out blastn_genomaludens_vs_mitocondrial_genes_e0.001.out
 Python script to process BLAST results and export to Excel
 The following Python script processes the BLAST output and generates a detailed Excel file including:
 
@@ -124,3 +111,4 @@ df_resultados = pd.DataFrame(resultados)
 df_resultados.to_excel("resultados.xlsx", index=False)
 
 print("Archivo Excel generado exitosamente: resultados.xlsx")
+
