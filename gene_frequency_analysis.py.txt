@@ -1,114 +1,116 @@
-Python script to process BLAST results and export to Excel
-The following Python script processes the BLAST output and generates a detailed Excel file including:
+Python script to process BLAST results (outfmt 6) and export summary statistics to Excel.
 
-Mitochondrial gene size
+This script generates an Excel file with, for each mitochondrial gene (qseqid):
+- Mitochondrial gene size (estimated as max(qend))
+- Number of alignments against the nuclear genome
+- Minimum, mean, and maximum alignment length
+- Minimum, mean, and maximum % gene coverage per alignment (length / gene_size * 100)
+- Maximum effective % gene coverage (union of merged query intervals)
+- Minimum, mean, and maximum percent identity (pident)
+"""
 
-Number of alignments with the nuclear genome
-
-Minimum, average, and maximum alignment lengths
-
-Minimum, average, and maximum percentage of gene coverage
-
-Average, minimum, and maximum percent identity
-	   
 import pandas as pd
 
+
 def merge_intervals(intervals):
-    """Fusiona intervalos solapados.
-       Cada intervalo es una tupla (inicio, fin).
     """
-    # Ordena los intervalos por el inicio
+    Merge overlapping intervals.
+    Each interval is a tuple: (start, end), inclusive.
+    """
     intervals = sorted(intervals, key=lambda x: x[0])
     merged = []
-    for interval in intervals:
-        if not merged or merged[-1][1] < interval[0] - 1:
-            merged.append(interval)
+
+    for start, end in intervals:
+        if not merged or merged[-1][1] < start - 1:
+            merged.append((start, end))
         else:
-            # Fusionar solapamientos extendiendo el final del intervalo actual
-            merged[-1] = (merged[-1][0], max(merged[-1][1], interval[1]))
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+
     return merged
 
-# Definir los nombres de las columnas según el formato outfmt 6
-columnas = [
-    "qseqid",    # Identificador del gen mitocondrial (consulta)
-    "sseqid",    # Identificador del sujeto (genoma nuclear)
-    "pident",    # Porcentaje de identidad
-    "length",    # Longitud del alineamiento
+
+# Column names for BLAST outfmt 6
+columns = [
+    "qseqid",    # Query ID (mitochondrial gene)
+    "sseqid",    # Subject ID (nuclear genome)
+    "pident",    # Percent identity
+    "length",    # Alignment length
     "mismatch",
     "gapopen",
-    "qstart",    # Inicio del alineamiento en la consulta
-    "qend",      # Fin del alineamiento en la consulta
+    "qstart",    # Query start
+    "qend",      # Query end
     "sstart",
     "send",
     "evalue",
     "bitscore"
 ]
 
-# Leer el archivo BLAST en formato tabulado
-df = pd.read_csv("blastn_nuclear_vs_mitocondrial_genes_e0.001.out", sep="\t", names=columnas)
+# Read BLAST tabular output
+df = pd.read_csv(
+    "blastn_nuclear_vs_mitocondrial_genes_e0.001.out",
+    sep="\t",
+    names=columns
+)
 
-resultados = []
+results = []
 
-# Agrupar por gen mitocondrial (qseqid)
-for gen, grupo in df.groupby("qseqid"):
-    # Se estima el tamaño del gen como el máximo valor de qend
-    tamano_gen = grupo["qend"].max()
-    
-    # Número de alineamientos con el genoma nuclear
-    num_alineamientos = grupo.shape[0]
-    
-    # Estadísticos de los alineamientos
-    tamano_medio_aline = grupo["length"].mean()
-    tamano_min_aline = grupo["length"].min()
-    tamano_max_aline = grupo["length"].max()
-    
-    # Calcular la cobertura individual de cada alineamiento
-    cobertura_ind = (grupo["length"] / tamano_gen) * 100
-    cobertura_ind_min = cobertura_ind.min()
-    cobertura_ind_mean = cobertura_ind.mean()
-    cobertura_ind_max = cobertura_ind.max()
-    
-    # Generar lista de intervalos (qstart, qend) para cada alineamiento
-    intervalos = []
-    for _, fila in grupo.iterrows():
-        inicio = min(fila["qstart"], fila["qend"])
-        fin = max(fila["qstart"], fila["qend"])
-        intervalos.append((inicio, fin))
-    
-    # Fusionar intervalos solapados
-    intervalos_fusionados = merge_intervals(intervalos)
-    
-    # Calcular la longitud total cubierta (sin exceder el tamaño del gen)
-    longitud_cubierta = sum(fin - inicio + 1 for inicio, fin in intervalos_fusionados)
-    longitud_cubierta_efectiva = min(longitud_cubierta, tamano_gen)
-    # Esta será la cobertura efectiva máxima, ajustada a 100%
-    cobertura_efectiva = (longitud_cubierta_efectiva / tamano_gen) * 100
-    
-    # Estadísticos del porcentaje de identidad
-    identidad_promedio = grupo["pident"].mean()
-    identidad_min = grupo["pident"].min()
-    identidad_max = grupo["pident"].max()
-    
-    # Almacenar los resultados en un diccionario
-    resultados.append({
-        "Gen del genoma mitocondrial": gen,
-        "Tamaño del gen mitocondrial": tamano_gen,
-        "Numero de alineamientos con el genoma nuclear": num_alineamientos,
-        "Tamaño medio de los alineamientos": tamano_medio_aline,
-        "Tamaño minimo de los alineamientos": tamano_min_aline,
-        "Tamaño máximo de los alineamientos": tamano_max_aline,
-        "Porcentaje mínimo del gen cubierto en el alineamiento": cobertura_ind_min,
-        "Porcentaje medio del gen cubierto en el alineamiento": cobertura_ind_mean,
-        "Porcentaje máximo del gen cubierto en el alineamiento": cobertura_ind_max,
-        "Porcentaje máximo del gen cubierto (efectivo)": cobertura_efectiva,
-        "Porcentaje de identidad promedio": identidad_promedio,
-        "Porcentaje de identidad mínimo": identidad_min,
-        "Porcentaje de identidad máxmo": identidad_max
+# Group by mitochondrial gene (qseqid)
+for gene, group in df.groupby("qseqid"):
+    # Estimate gene size as the maximum qend for that gene
+    gene_size = group["qend"].max()
+
+    # Number of alignments against nuclear genome
+    n_alignments = group.shape[0]
+
+    # Alignment length statistics
+    aln_len_mean = group["length"].mean()
+    aln_len_min = group["length"].min()
+    aln_len_max = group["length"].max()
+
+    # Per-alignment gene coverage (%)
+    coverage_per_aln = (group["length"] / gene_size) * 100
+    coverage_min = coverage_per_aln.min()
+    coverage_mean = coverage_per_aln.mean()
+    coverage_max = coverage_per_aln.max()
+
+    # Build (qstart, qend) intervals for each alignment (inclusive)
+    intervals = []
+    for _, row in group.iterrows():
+        start = min(row["qstart"], row["qend"])
+        end = max(row["qstart"], row["qend"])
+        intervals.append((start, end))
+
+    # Merge overlapping query intervals to compute effective coverage
+    merged = merge_intervals(intervals)
+
+    covered_length = sum(end - start + 1 for start, end in merged)
+    covered_length_effective = min(covered_length, gene_size)  # cap at gene size
+    effective_coverage = (covered_length_effective / gene_size) * 100
+
+    # Percent identity statistics
+    pid_mean = group["pident"].mean()
+    pid_min = group["pident"].min()
+    pid_max = group["pident"].max()
+
+    results.append({
+        "Mitochondrial gene": gene,
+        "Mitochondrial gene size": gene_size,
+        "Number of alignments vs nuclear genome": n_alignments,
+        "Mean alignment length": aln_len_mean,
+        "Min alignment length": aln_len_min,
+        "Max alignment length": aln_len_max,
+        "Min % of gene covered per alignment": coverage_min,
+        "Mean % of gene covered per alignment": coverage_mean,
+        "Max % of gene covered per alignment": coverage_max,
+        "Max effective % gene coverage (merged intervals)": effective_coverage,
+        "Mean % identity": pid_mean,
+        "Min % identity": pid_min,
+        "Max % identity": pid_max
     })
 
-# Convertir la lista de resultados en un DataFrame y exportar a Excel
-df_resultados = pd.DataFrame(resultados)
-df_resultados.to_excel("resultados.xlsx", index=False)
-
+# Export results to Excel
+df_results = pd.DataFrame(results)
+df_results.to_excel("results.xlsx", index=False)
 print("Archivo Excel generado exitosamente: resultados.xlsx")
+
 
